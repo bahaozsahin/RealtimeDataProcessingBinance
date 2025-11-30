@@ -115,6 +115,13 @@ docker-compose up -d
 - Transformations: edit `kafka_transformer/transformer.py`, update Pinot schema/table if fields change, then `docker-compose build kafka-transformer`.
 - Visualizations: use Superset SQL Lab against `binance_realtime`; sample queries in `data_viz/superset/sample_queries.md`.
 
+## Current ToDos: 
+- Kafka transformations are not getting through to Pinot,
+- Symbol logic is only allowing 1 at one time,
+- More Charts,
+- Adding a final dashboard
+
+
 ## Security
 
 - Keep `.env` local (gitignored). Use `.env.example` as the template.
