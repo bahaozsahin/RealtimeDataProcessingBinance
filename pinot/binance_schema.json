@@ -1,0 +1,55 @@
+{
+  "schemaName": "binance_realtime",
+  "dimensionFieldSpecs": [
+    {
+      "name": "symbol",
+      "dataType": "STRING"
+    },
+    {
+      "name": "stream_type",
+      "dataType": "STRING"
+    },
+    {
+      "name": "timezone",
+      "dataType": "STRING"
+    }
+  ],
+  "metricFieldSpecs": [
+    {
+      "name": "price",
+      "dataType": "DOUBLE"
+    },
+    {
+      "name": "volume",
+      "dataType": "DOUBLE"
+    },
+    {
+      "name": "high_24h",
+      "dataType": "DOUBLE"
+    },
+    {
+      "name": "low_24h",
+      "dataType": "DOUBLE"
+    },
+    {
+      "name": "price_change_24h",
+      "dataType": "DOUBLE"
+    },
+    {
+      "name": "count",
+      "dataType": "INT"
+    },
+    {
+      "name": "processing_latency_ms",
+      "dataType": "DOUBLE"
+    }
+  ],
+  "dateTimeFieldSpecs": [
+    {
+      "name": "timestamp_unix",
+      "dataType": "LONG",
+      "format": "1:SECONDS:EPOCH",
+      "granularity": "1:SECONDS"
+    }
+  ]
+}

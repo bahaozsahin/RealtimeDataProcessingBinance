@@ -1,0 +1,301 @@
+version: '3.8'
+
+networks:
+  binance-network:
+    driver: bridge
+
+volumes:
+  pinot-data:
+    driver: local
+  superset-data:
+    driver: local
+  postgres-data:
+    driver: local
+  zk-data:
+    driver: local
+  zk-logs:
+    driver: local
+  kafka-data:
+    driver: local
+
+services:
+  
+  zookeeper:
+    image: confluentinc/cp-zookeeper:7.4.0
+    container_name: zookeeper
+    networks:
+      - binance-network
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+      ZOOKEEPER_INIT_LIMIT: 10
+      ZOOKEEPER_SYNC_LIMIT: 5
+      ZOOKEEPER_MAX_CLIENT_CNXNS: 60
+      ZOOKEEPER_AUTOPURGE_SNAP_RETAIN_COUNT: 3
+      ZOOKEEPER_AUTOPURGE_PURGE_INTERVAL: 24
+      ZOOKEEPER_4LW_COMMANDS_WHITELIST: "*"
+      ZOOKEEPER_LOG4J_ROOT_LOGLEVEL: WARN
+    ports:
+      - "2181:2181"
+    volumes:
+      - zk-data:/var/lib/zookeeper/data
+      - zk-logs:/var/lib/zookeeper/log
+    healthcheck:
+      test: ["CMD", "bash", "-c", "nc -z localhost 2181"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+
+  kafka:
+    image: confluentinc/cp-kafka:7.4.0
+    container_name: kafka
+    depends_on:
+      zookeeper:
+        condition: service_healthy
+    networks:
+      - binance-network
+    ports:
+      - "9092:9092"
+      - "9101:9101"
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: "zookeeper:2181"
+      KAFKA_ZOOKEEPER_CONNECTION_TIMEOUT_MS: 60000
+      KAFKA_ZOOKEEPER_SESSION_TIMEOUT_MS: 40000
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:29092,PLAINTEXT_HOST://localhost:9092
+      KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:29092,PLAINTEXT_HOST://0.0.0.0:9092
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+      KAFKA_NUM_PARTITIONS: 3
+      KAFKA_DEFAULT_REPLICATION_FACTOR: 1
+      KAFKA_JMX_PORT: 9101
+      KAFKA_JMX_HOSTNAME: localhost
+      KAFKA_LOG4J_ROOT_LOGLEVEL: WARN
+    volumes:
+      - kafka-data:/var/lib/kafka/data
+    healthcheck:
+      test: ["CMD", "bash", "-c", "unset JMX_PORT; kafka-broker-api-versions --bootstrap-server localhost:9092"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  kafka-producer:
+    build: ./kafka_producer
+    container_name: kafka-producer
+    depends_on:
+      kafka:
+        condition: service_healthy
+    networks:
+      - binance-network
+    environment:
+      - KAFKA_BROKER_URL=kafka:29092
+      - KAFKA_TOPIC_BINANCE=${KAFKA_TOPIC_BINANCE}
+      - BINANCE_WS_BASE_URL=${BINANCE_WS_BASE_URL}
+      - BINANCE_SYMBOL=${BINANCE_SYMBOL}
+      - BINANCE_STREAM_TYPE=${BINANCE_STREAM_TYPE}
+      - LOG_LEVEL=${LOG_LEVEL}
+    env_file:
+      - .env
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import socket; s=socket.socket(); s.connect(('kafka', 29092)); s.close()"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  kafka-transformer:
+    build: ./kafka_transformer
+    container_name: kafka-transformer
+    depends_on:
+      kafka:
+        condition: service_healthy
+      kafka-producer:
+        condition: service_healthy
+    networks:
+      - binance-network
+    environment:
+      - KAFKA_BROKER_URL=kafka:29092
+      - KAFKA_TOPIC_BINANCE=${KAFKA_TOPIC_BINANCE}
+      - KAFKA_TOPIC_TRANSFORMED=${KAFKA_TOPIC_TRANSFORMED}
+      - KAFKA_CONSUMER_GROUP_ID=${KAFKA_CONSUMER_GROUP_ID}
+      - LOG_LEVEL=${LOG_LEVEL}
+    env_file:
+      - .env
+    restart: unless-stopped
+
+  pinot-controller:
+    image: apachepinot/pinot:0.12.1
+    container_name: pinot-controller
+    command: "StartController -zkAddress zookeeper:2181 -clusterName PinotCluster"
+    depends_on:
+      zookeeper:
+        condition: service_healthy
+    networks:
+      - binance-network
+    ports:
+      - "9000:9000"
+    environment:
+      JAVA_OPTS: "-Xms512m -Xmx1024m -XX:+UseG1GC"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/health"]
+      interval: 30s
+      timeout: 15s
+      retries: 5
+      start_period: 60s
+
+  pinot-broker:
+    image: apachepinot/pinot:0.12.1
+    container_name: pinot-broker
+    command: "StartBroker -zkAddress zookeeper:2181 -clusterName PinotCluster"
+    depends_on:
+      pinot-controller:
+        condition: service_healthy
+    networks:
+      - binance-network
+    ports:
+      - "8099:8099"
+    environment:
+      JAVA_OPTS: "-Xms512m -Xmx1024m -XX:+UseG1GC"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8099/health"]
+      interval: 30s
+      timeout: 15s
+      retries: 5
+      start_period: 60s
+
+  pinot-server:
+    image: apachepinot/pinot:0.12.1
+    container_name: pinot-server
+    command: "StartServer -zkAddress zookeeper:2181 -clusterName PinotCluster"
+    depends_on:
+      pinot-controller:
+        condition: service_healthy
+    networks:
+      - binance-network
+    volumes:
+      - pinot-data:/var/pinot/server/data
+    ports:
+      - "8098:8098"
+    environment:
+      JAVA_OPTS: "-Xms512m -Xmx1024m -XX:+UseG1GC"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8097/health"]
+      interval: 30s
+      timeout: 15s
+      retries: 5
+      start_period: 60s
+
+  pinot-setup:
+    image: curlimages/curl:8.1.2
+    container_name: pinot-setup
+    depends_on:
+      pinot-controller:
+        condition: service_healthy
+      pinot-broker:
+        condition: service_healthy
+      pinot-server:
+        condition: service_healthy
+    networks:
+      - binance-network
+    volumes:
+      - ./pinot:/opt/pinot
+    command: >
+      sh -c "
+        echo 'Waiting for Pinot cluster to be fully ready...' &&
+        sleep 30 &&
+        echo 'Checking Pinot controller health...' &&
+        curl -f http://pinot-controller:9000/health &&
+        echo 'Cleaning up existing schema and table...' &&
+        curl -X DELETE 'http://pinot-controller:9000/tables/binance_realtime' 2>/dev/null || true &&
+        curl -X DELETE 'http://pinot-controller:9000/schemas/binance_realtime' 2>/dev/null || true &&
+        sleep 5 &&
+        echo 'Creating Pinot schema...' &&
+        curl -X POST 'http://pinot-controller:9000/schemas' -H 'Content-Type: application/json' -d @/opt/pinot/binance_schema.json &&
+        echo 'Schema created successfully!' &&
+        echo 'Pinot setup completed! You can now create the table manually through the UI.'
+      "
+    restart: "no"
+
+  postgres:
+    image: postgres:15-alpine
+    container_name: superset-postgres
+    networks:
+      - binance-network
+    environment:
+      POSTGRES_DB: superset
+      POSTGRES_USER: superset
+      POSTGRES_PASSWORD: superset
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U superset"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  redis:
+    image: redis:7-alpine
+    container_name: superset-redis
+    networks:
+      - binance-network
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  superset:
+    image: apache/superset:3.0.0
+    container_name: superset
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      pinot-setup:
+        condition: service_completed_successfully
+    networks:
+      - binance-network
+    ports:
+      - "${SUPERSET_PORT}:8088"
+    environment:
+      - SUPERSET_SECRET_KEY=${SUPERSET_SECRET_KEY}
+      - SUPERSET_ADMIN_USER=${SUPERSET_ADMIN_USER}
+      - SUPERSET_ADMIN_PASSWORD=${SUPERSET_ADMIN_PASSWORD}
+      - SUPERSET_ADMIN_EMAIL=${SUPERSET_ADMIN_EMAIL}
+      - DATABASE_URL=postgresql://superset:superset@postgres:5432/superset
+      - REDIS_URL=redis://redis:6379
+      - PYTHONPATH=/app/pythonpath:/app/docker/pythonpath_dev
+      - SUPERSET_CONFIG_PATH=/app/docker/pythonpath_dev/superset_config.py
+      - SUPERSET_WEBSERVER_TIMEOUT=120
+      - FLASK_ENV=production
+    volumes:
+      - superset-data:/app/superset_home
+      - ./data_viz/superset:/app/docker/pythonpath_dev
+    command: >
+      bash -c "
+        echo 'Installing dependencies...' &&
+        pip install --no-cache-dir pinotdb pendulum &&
+        echo 'Upgrading Superset database...' &&
+        superset db upgrade &&
+        echo 'Creating admin user...' &&
+        superset fab create-admin --username $$SUPERSET_ADMIN_USER --firstname Admin --lastname User --email $$SUPERSET_ADMIN_EMAIL --password $$SUPERSET_ADMIN_PASSWORD || echo 'Admin user may already exist' &&
+        echo 'Initializing Superset...' &&
+        superset init &&
+        echo 'Starting Superset server...' &&
+        superset run -p 8088 --host 0.0.0.0 --reload --debugger
+      "
+    env_file:
+      - .env
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8088/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 120s
+

@@ -1,0 +1,5 @@
+kafka-python==2.0.2
+websocket-client==1.6.4
+python-dotenv==1.0.0
+requests==2.31.0
+pendulum==3.0.0
