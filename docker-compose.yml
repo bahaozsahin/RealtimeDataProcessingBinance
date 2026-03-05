@@ -1,0 +1,66 @@
+services:
+  # ── Message Broker ──────────────────────────────────
+  redpanda:
+    image: redpandadata/redpanda:latest
+    command:
+      - redpanda start
+      - --overprovisioned
+      - --smp 1
+      - --memory 256M
+      - --reserve-memory 0M
+      - --node-id 0
+      - --kafka-addr PLAINTEXT://0.0.0.0:29092,OUTSIDE://0.0.0.0:9092
+      - --advertise-kafka-addr PLAINTEXT://redpanda:29092,OUTSIDE://localhost:9092
+      - --pandaproxy-addr 0.0.0.0:8082
+      - --advertise-pandaproxy-addr localhost:8082
+    ports:
+      - "9092:9092"
+      - "8082:8082"
+      - "9644:9644"
+    volumes:
+      - redpanda_data:/var/lib/redpanda/data
+    healthcheck:
+      test: ["CMD", "rpk", "cluster", "health"]
+      interval: 10s
+      retries: 5
+
+  redpanda-console:
+    image: redpandadata/console:latest
+    ports:
+      - "8080:8080"
+    environment:
+      KAFKA_BROKERS: redpanda:29092
+    depends_on:
+      redpanda:
+        condition: service_healthy
+
+  # ── Producer ────────────────────────────────────────
+  producer:
+    build: ./producer
+    secrets:
+      - symbols
+      - stream_type
+      - redpanda_broker
+      - topic
+      - log_level
+    depends_on:
+      redpanda:
+        condition: service_healthy
+    restart: unless-stopped
+
+# ── Secrets ─────────────────────────────────────────
+secrets:
+  symbols:
+    file: ./secrets/symbols.txt
+  stream_type:
+    file: ./secrets/stream_type.txt
+  redpanda_broker:
+    file: ./secrets/redpanda_broker.txt
+  topic:
+    file: ./secrets/topic.txt
+  log_level:
+    file: ./secrets/log_level.txt
+
+# ── Volumes ─────────────────────────────────────────
+volumes:
+  redpanda_data:
