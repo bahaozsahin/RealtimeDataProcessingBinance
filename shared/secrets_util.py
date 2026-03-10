@@ -5,7 +5,7 @@ Reads secrets from /run/secrets/ (Docker) with fallbacks to env vars and default
 All secret values are wrapped in a SecretStr that prevents accidental logging/printing.
 
 Usage:
-    from secrets_util import read_secret
+    from shared.secrets_util import read_secret
 
     broker = read_secret("redpanda_broker", default="localhost:9092")
     print(broker)          # → "******" (masked)

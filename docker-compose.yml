@@ -36,7 +36,9 @@ services:
 
   # ── Producer ────────────────────────────────────────
   producer:
-    build: ./producer
+    build:
+      context: .
+      dockerfile: producer/Dockerfile
     secrets:
       - symbols
       - stream_type
@@ -89,19 +91,21 @@ services:
       retries: 5
 
   # ── Batch Consumer ─────────────────────────────────
-  # consumer:
-  #   build: ./consumer
-  #   secrets:
-  #     - redpanda_broker
-  #     - topic
-  #     - postgres_password
-  #     - log_level
-  #   depends_on:
-  #     redpanda:
-  #       condition: service_healthy
-  #     postgres:
-  #       condition: service_healthy
-  #   restart: unless-stopped
+  consumer:
+    build:
+      context: .
+      dockerfile: consumer/Dockerfile
+    secrets:
+      - redpanda_broker
+      - topic
+      - postgres_password
+      - log_level
+    depends_on:
+      redpanda:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
 
   # ── Orchestrator ───────────────────────────────────
   # dagster:

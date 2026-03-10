@@ -15,9 +15,7 @@ Features:
 from __future__ import annotations
 
 import asyncio
-import logging
 import signal
-import sys
 import time
 from datetime import datetime, timezone
 from typing import Any
@@ -26,17 +24,13 @@ import orjson
 import websockets
 from aiokafka import AIOKafkaProducer
 
-from secrets_util import read_secret, read_secret_raw
+from shared.logging_config import setup_logging
+from shared.secrets_util import read_secret, read_secret_raw
 
 # ── Logging ──────────────────────────────────────────────────────────────────
 
-logging.basicConfig(
-    level=logging.INFO,
-    format='{"time":"%(asctime)s","level":"%(levelname)s","logger":"%(name)s","msg":"%(message)s"}',
-    datefmt="%Y-%m-%dT%H:%M:%S",
-    stream=sys.stdout,
-)
-logger = logging.getLogger("producer")
+LOG_LEVEL = read_secret_raw("log_level", default="INFO")
+logger = setup_logging("producer", LOG_LEVEL)
 
 # ── Configuration ────────────────────────────────────────────────────────────
 
@@ -44,9 +38,6 @@ SYMBOLS = read_secret("symbols", default="btcusdt,ethusdt,solusdt,bnbusdt,xrpusd
 STREAM_TYPE = read_secret_raw("stream_type", default="trade")
 BROKER = read_secret("redpanda_broker", default="redpanda:9092")
 TOPIC = read_secret_raw("topic", default="binance-tickers")
-LOG_LEVEL = read_secret_raw("log_level", default="INFO")
-
-logger.setLevel(LOG_LEVEL.upper())
 
 # Binance WebSocket base URL
 BINANCE_WS_BASE = "wss://stream.binance.com:9443"
